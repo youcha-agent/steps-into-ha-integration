@@ -22,7 +22,7 @@
         },
         "data_description": {
           "url_source": "Home Assistant Cloud and External work from anywhere. Internal only works at home.",
-          "custom_url": "Only used when you pick **Custom** above. Choose this if you reach Home Assistant through a reverse proxy, your own domain, DuckDNS or Tailscale — addresses Home Assistant can't discover on its own. You can paste just the base address, like `https://ha.example.com`, and the webhook path will be added for you."
+          "custom_url": "Only used when you pick **Custom** above. Choose this if you reach Home Assistant through a reverse proxy, your own domain, DuckDNS or Tailscale — addresses Home Assistant can't discover on its own. Paste the same address you use in your browser; you can leave the webhook path off and it will be added for you."
         }
       },
       "connect": {
@@ -38,7 +38,7 @@
       "invalid_webhook_id": "Use 8 to 64 letters, numbers, hyphens or underscores.",
       "webhook_id_in_use": "Something else in Home Assistant already uses that webhook ID — usually a webhook trigger in configuration.yaml. Pick a different one.",
       "custom_url_required": "Fill in the custom address, or pick one of the other options.",
-      "invalid_url": "That doesn't look like a web address. It needs to start with http:// or https:// — for example https://ha.example.com",
+      "invalid_url": "That doesn't look like a web address. It needs to start with http:// or https:// followed by your Home Assistant's host name.",
       "url_unavailable": "That address is no longer available. Pick another one."
     },
     "abort": {
@@ -56,7 +56,7 @@
         },
         "data_description": {
           "url_source": "Home Assistant Cloud and External work from anywhere. Internal only works at home.",
-          "custom_url": "Only used when you pick **Custom** above. Choose this if you reach Home Assistant through a reverse proxy, your own domain, DuckDNS or Tailscale — addresses Home Assistant can't discover on its own. You can paste just the base address, like `https://ha.example.com`, and the webhook path will be added for you."
+          "custom_url": "Only used when you pick **Custom** above. Choose this if you reach Home Assistant through a reverse proxy, your own domain, DuckDNS or Tailscale — addresses Home Assistant can't discover on its own. Paste the same address you use in your browser; you can leave the webhook path off and it will be added for you."
         }
       },
       "connect": {
