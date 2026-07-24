@@ -23,7 +23,8 @@
     },
     "error": {
       "invalid_person": "Enter a name.",
-      "invalid_webhook_id": "Use 8 to 64 letters, numbers, hyphens or underscores."
+      "invalid_webhook_id": "Use 8 to 64 letters, numbers, hyphens or underscores.",
+      "webhook_id_in_use": "Something else in Home Assistant already uses that webhook ID — usually a webhook trigger in configuration.yaml. Pick a different one."
     },
     "abort": {
       "already_configured": "That webhook ID is already in use by another person."

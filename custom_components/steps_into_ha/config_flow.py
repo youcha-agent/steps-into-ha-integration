@@ -70,6 +70,32 @@ async def async_resolve_webhook_url(
     return webhook.async_generate_url(hass, webhook_id), False
 
 
+@callback
+def async_is_webhook_id_taken(hass: HomeAssistant, webhook_id: str) -> bool:
+    """Whether anything in Home Assistant already owns this webhook ID.
+
+    Matters because a `template:` webhook trigger in configuration.yaml holds an ID too,
+    and those aren't config entries — so the flow's own duplicate check can't see them.
+    Someone running both setup routes could otherwise pick the same ID twice and get a
+    config entry that just fails to start.
+
+    There's no public "is this taken" helper, so register a no-op and immediately drop it.
+    Both calls are synchronous with no await between them, so the momentary registration
+    can't receive a request.
+    """
+
+    async def _probe(hass: HomeAssistant, webhook_id: str, request: Any) -> None:
+        return None
+
+    try:
+        webhook.async_register(hass, DOMAIN, "probe", webhook_id, _probe)
+    except ValueError:
+        return True
+
+    webhook.async_unregister(hass, webhook_id)
+    return False
+
+
 def _qr_schema(person: str, url: str) -> vol.Schema:
     """A display-only form: QrCodeSelector renders the code and returns no input."""
     return vol.Schema(
@@ -117,6 +143,12 @@ class StepsIntoHAConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.async_set_unique_id(webhook_id)
                 self._abort_if_unique_id_configured()
 
+            if not errors and async_is_webhook_id_taken(self.hass, webhook_id):
+                # Only reachable for a hand-picked ID; a generated one is 64 random hex
+                # characters. Almost always a clash with a template: block in YAML.
+                errors[CONF_WEBHOOK_ID] = "webhook_id_in_use"
+
+            if not errors:
                 self._person = person
                 self._webhook_id = webhook_id
                 self._url, self._cloudhook = await async_resolve_webhook_url(

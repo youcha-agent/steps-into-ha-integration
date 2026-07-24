@@ -17,6 +17,7 @@ from homeassistant.components import webhook
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryError
 from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
@@ -70,18 +71,30 @@ async def handle_webhook(
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up one person from a config entry."""
-    webhook.async_register(
-        hass,
-        DOMAIN,
-        entry.title,
-        entry.data[CONF_WEBHOOK_ID],
-        handle_webhook,
-        allowed_methods=["POST"],
-        # The phone syncs from wherever it happens to be, and requests arriving via a
-        # reverse proxy or Nabu Casa count as remote. local_only would drop those
-        # silently. The generated webhook ID is the secret instead.
-        local_only=False,
-    )
+    webhook_id = entry.data[CONF_WEBHOOK_ID]
+    try:
+        webhook.async_register(
+            hass,
+            DOMAIN,
+            entry.title,
+            webhook_id,
+            handle_webhook,
+            allowed_methods=["POST"],
+            # The phone syncs from wherever it happens to be, and requests arriving via a
+            # reverse proxy or Nabu Casa count as remote. local_only would drop those
+            # silently. The generated webhook ID is the secret instead.
+            local_only=False,
+        )
+    except ValueError as err:
+        # Home Assistant allows exactly one owner per webhook ID. The config flow checks
+        # for this, but a `template:` block can be added to configuration.yaml afterwards
+        # — so fail with something a human can act on rather than a traceback.
+        raise ConfigEntryError(
+            f"Webhook ID {webhook_id} is already in use, most likely by a webhook trigger"
+            " in configuration.yaml. Remove that block, or delete this person and add"
+            " them again to get a different ID."
+        ) from err
+
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(entry.add_update_listener(async_reload_entry))
     return True

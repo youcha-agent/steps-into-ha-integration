@@ -103,6 +103,18 @@ Edit the `series` list to match your family's entity IDs.
 
 ---
 
+## Running alongside the YAML setup
+
+You can use both at once — the integration for some family members, a `template:` webhook
+block in `configuration.yaml` for others. They're independent, and each person's sensor
+updates on its own.
+
+The **one** thing you can't do is give both the same `webhook_id`. Home Assistant allows a
+single owner per webhook, so the second one to load fails. You'll only ever hit this if you
+hand-pick an ID under Advanced Mode; the generated ones are 64 random hex characters. The
+setup form refuses an ID that's already taken, and if a `configuration.yaml` block claims
+one later, the integration fails with a message saying so rather than a traceback.
+
 ## Upgrading from the YAML setup
 
 Earlier versions of the app asked you to paste a `template:` block into
