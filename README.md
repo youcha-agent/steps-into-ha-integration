@@ -1,0 +1,173 @@
+# Steps Into HA — Home Assistant integration
+
+[![HACS Custom][hacs-badge]][hacs]
+[![Validate][validate-badge]][validate]
+
+Puts your iPhone's **daily step count** on your Home Assistant dashboard, so you can build a
+family step leaderboard. Pairs with the [**Steps Into HA**][appstore] iOS app, which reads
+your step count from Apple Health and pushes it to your own Home Assistant — no third-party
+servers, no account, no subscription.
+
+<!-- TODO: screenshot of the QR pairing step and a family bar chart -->
+
+---
+
+## Setup
+
+**1. Install this integration** from HACS, then restart Home Assistant.
+
+**2. Add a person:** Settings → Devices & Services → **Add Integration** → *Steps Into HA*.
+Type a name. Home Assistant creates a private webhook and shows you a QR code.
+
+**3. Install [Steps Into HA][appstore]** on that person's iPhone, allow Apple Health access,
+and scan the QR code.
+
+That's it. You get `sensor.<name>_steps`, updated about once an hour in the background.
+
+Repeat step 2 for each family member — one entry per phone.
+
+> **Using an older version of the app** that asks for a "Home Assistant address" and a
+> "Webhook ID" in separate fields? Turn on **Advanced Mode** in your Home Assistant user
+> profile before step 2. The setup form then lets you choose your own webhook ID, so you can
+> pick something short enough to type. Make it unguessable — it's the only thing protecting
+> the sensor.
+
+### Nabu Casa users
+
+If you have a Home Assistant Cloud subscription, the integration automatically creates a
+**cloudhook** and puts that URL in the QR code. Your phone then syncs from anywhere with no
+port forwarding, no reverse proxy, and nothing exposed to the internet.
+
+---
+
+## What you get
+
+Each person becomes a device with two entities:
+
+| Entity | What it is |
+|---|---|
+| `sensor.<name>_steps` | Today's step count. `state_class: total_increasing`, so long-term statistics and the midnight reset work correctly. |
+| `sensor.<name>_last_sync` | When that phone last reached Home Assistant. Diagnostic — the quick answer to "is it actually syncing?" |
+
+The step count survives a Home Assistant restart, rather than going unknown until the phone's
+next hourly push.
+
+---
+
+## A family chart
+
+Install [ApexCharts Card][apexcharts] from HACS and add this as a manual card:
+
+```yaml
+type: custom:apexcharts-card
+header:
+  show: true
+  title: Family Steps
+  show_states: true
+  colorize_states: true
+graph_span: 7d
+span:
+  end: day
+chart_type: bar
+apex_config:
+  chart:
+    height: 320
+  plotOptions:
+    bar:
+      columnWidth: 70%
+  dataLabels:
+    enabled: false
+  xaxis:
+    labels:
+      format: ddd
+all_series_config:
+  type: column
+  group_by:
+    # A day's step count is cumulative, so take the highest value seen that day.
+    func: max
+    duration: 1d
+series:
+  - entity: sensor.person_1_steps
+    name: Person 1
+    color: "#34b95c"
+  - entity: sensor.person_2_steps
+    name: Person 2
+    color: "#3486eb"
+```
+
+Edit the `series` list to match your family's entity IDs.
+
+---
+
+## Upgrading from the YAML setup
+
+Earlier versions of the app asked you to paste a `template:` block into
+`configuration.yaml`. To move over:
+
+1. Add each person through the integration (step 2 above).
+2. Point your dashboard cards at the new entity IDs.
+3. Delete the old `template:` webhook blocks from `configuration.yaml` and restart.
+
+History from the old sensors stays under their old entity IDs; it doesn't move to the new
+ones. If you'd rather keep an unbroken chart, rename the old entities out of the way *before*
+adding the integration and give the new sensors the old IDs.
+
+---
+
+## Troubleshooting
+
+**The app says "Sent" but nothing appears.** Check the integration's *Last sync* entity. If it
+never updates, the phone isn't reaching Home Assistant — most often because the QR code holds
+your internal URL and the phone is off your Wi-Fi.
+
+**HTTP 400 from the app.** The webhook rejected the payload. Enable debug logging to see why:
+
+```yaml
+logger:
+  logs:
+    custom_components.steps_into_ha: debug
+```
+
+**HTTP 404 or 405.** The webhook ID doesn't match, or something is sending a `GET`. Only
+`POST` is accepted. Re-open **Configure** on the integration to see the correct URL.
+
+**A step count that never moves.** iOS throttles HealthKit background delivery to roughly
+hourly. That's an app-side constraint, not something this integration can change.
+
+---
+
+## Privacy
+
+This integration receives step counts sent directly from your phone to your Home Assistant.
+It makes no outbound connections, has no analytics, and talks to no third-party service. See
+the app's [privacy policy][privacy].
+
+## Manual installation
+
+Copy `custom_components/steps_into_ha/` into your Home Assistant `config/custom_components/`
+directory and restart.
+
+## Development
+
+```bash
+python -m venv .venv && .venv/bin/pip install -r requirements_test.txt
+.venv/bin/pytest                       # unit + webhook tests, in-process Home Assistant
+.venv/bin/ruff check custom_components tests
+
+# Boots a real Home Assistant against a throwaway config dir, drives the config flow,
+# and posts over a real socket — including a restart to check state restore.
+PATH="$PWD/.venv/bin:$PATH" ./scripts/run_live_check.sh
+```
+
+## Related
+
+- [Steps Into HA iOS app][appstore] — [source][apprepo]
+
+[appstore]: https://apps.apple.com/app/steps-into-ha
+[apprepo]: https://github.com/youcha-agent/steps-into-ha
+[privacy]: https://github.com/youcha-agent/steps-into-ha/blob/main/PRIVACY.md
+[apexcharts]: https://github.com/RomRider/apexcharts-card
+[hacs]: https://hacs.xyz
+[hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
+[validate]: https://github.com/youcha-agent/steps-into-ha-integration/actions/workflows/validate.yml
+[validate-badge]: https://github.com/youcha-agent/steps-into-ha-integration/actions/workflows/validate.yml/badge.svg

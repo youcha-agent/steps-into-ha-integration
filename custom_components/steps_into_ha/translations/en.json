@@ -1,0 +1,53 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add a person",
+        "description": "Add one person per phone. Home Assistant will create a private webhook for them — nothing to add to `configuration.yaml`, and no restart needed.",
+        "data": {
+          "person": "Name",
+          "webhook_id": "Custom webhook ID"
+        },
+        "data_description": {
+          "person": "Just a label for the sensor and your charts. It doesn't have to be unique.",
+          "webhook_id": "Leave empty unless you're using an older version of the app that asks you to type the ID by hand. This value is the only thing protecting the sensor, so make it unguessable — 8 to 64 letters, numbers, hyphens or underscores."
+        }
+      },
+      "connect": {
+        "title": "Connect {person}'s phone",
+        "description": "Open **Steps Into HA** on {person}'s iPhone and scan this code.\n\nIf your version of the app doesn't have a scanner yet, enter this address by hand instead:\n\n`{url}`\n\nWebhook ID: `{webhook_id}`\n\nYou can bring this code back up any time from the integration's **Configure** button.",
+        "data": {
+          "qr": "Scan with the app"
+        }
+      }
+    },
+    "error": {
+      "invalid_person": "Enter a name.",
+      "invalid_webhook_id": "Use 8 to 64 letters, numbers, hyphens or underscores."
+    },
+    "abort": {
+      "already_configured": "That webhook ID is already in use by another person."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Connect {person}'s phone",
+        "description": "Open **Steps Into HA** on {person}'s iPhone and scan this code.\n\nTo enter it by hand instead:\n\n`{url}`\n\nWebhook ID: `{webhook_id}`",
+        "data": {
+          "qr": "Scan with the app"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "steps": {
+        "name": "Steps"
+      },
+      "last_sync": {
+        "name": "Last sync"
+      }
+    }
+  }
+}
