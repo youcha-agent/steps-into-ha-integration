@@ -13,6 +13,18 @@
           "webhook_id": "Leave empty unless you're using an older version of the app that asks you to type the ID by hand. This value is the only thing protecting the sensor, so make it unguessable — 8 to 64 letters, numbers, hyphens or underscores."
         }
       },
+      "url": {
+        "title": "Which address should {person}'s phone use?",
+        "description": "The phone sends steps from wherever it happens to be — the shops, work, a friend's house. So pick an address that reaches Home Assistant from outside your home, or it will only sync when {person} is on your Wi-Fi.\n\nAddresses Home Assistant knows about:\n\n{addresses}{notice}",
+        "data": {
+          "url_source": "Address to use",
+          "custom_url": "Custom address"
+        },
+        "data_description": {
+          "url_source": "Home Assistant Cloud and External work from anywhere. Internal only works at home.",
+          "custom_url": "Only used when you pick **Custom** above. Choose this if you reach Home Assistant through a reverse proxy, your own domain, DuckDNS or Tailscale — addresses Home Assistant can't discover on its own. You can paste just the base address, like `https://ha.example.com`, and the webhook path will be added for you."
+        }
+      },
       "connect": {
         "title": "Connect {person}'s phone",
         "description": "Open **Steps Into HA** on {person}'s iPhone and scan this code.\n\nIf your version of the app doesn't have a scanner yet, enter this address by hand instead:\n\n`{url}`\n\nWebhook ID: `{webhook_id}`\n\nYou can bring this code back up any time from the integration's **Configure** button.",
@@ -24,7 +36,10 @@
     "error": {
       "invalid_person": "Enter a name.",
       "invalid_webhook_id": "Use 8 to 64 letters, numbers, hyphens or underscores.",
-      "webhook_id_in_use": "Something else in Home Assistant already uses that webhook ID — usually a webhook trigger in configuration.yaml. Pick a different one."
+      "webhook_id_in_use": "Something else in Home Assistant already uses that webhook ID — usually a webhook trigger in configuration.yaml. Pick a different one.",
+      "custom_url_required": "Fill in the custom address, or pick one of the other options.",
+      "invalid_url": "That doesn't look like a web address. It needs to start with http:// or https:// — for example https://ha.example.com",
+      "url_unavailable": "That address is no longer available. Pick another one."
     },
     "abort": {
       "already_configured": "That webhook ID is already in use by another person."
@@ -33,11 +48,33 @@
   "options": {
     "step": {
       "init": {
+        "title": "Which address should {person}'s phone use?",
+        "description": "Change this if {person}'s phone stopped syncing when away from home, or if your Home Assistant address has moved.\n\nAddresses Home Assistant knows about:\n\n{addresses}{notice}",
+        "data": {
+          "url_source": "Address to use",
+          "custom_url": "Custom address"
+        },
+        "data_description": {
+          "url_source": "Home Assistant Cloud and External work from anywhere. Internal only works at home.",
+          "custom_url": "Only used when you pick **Custom** above. Choose this if you reach Home Assistant through a reverse proxy, your own domain, DuckDNS or Tailscale — addresses Home Assistant can't discover on its own. You can paste just the base address, like `https://ha.example.com`, and the webhook path will be added for you."
+        }
+      },
+      "connect": {
         "title": "Connect {person}'s phone",
         "description": "Open **Steps Into HA** on {person}'s iPhone and scan this code.\n\nTo enter it by hand instead:\n\n`{url}`\n\nWebhook ID: `{webhook_id}`",
         "data": {
           "qr": "Scan with the app"
         }
+      }
+    }
+  },
+  "selector": {
+    "url_source": {
+      "options": {
+        "cloud": "Home Assistant Cloud — works from anywhere",
+        "external": "External address — works from anywhere",
+        "internal": "Internal address — only works at home",
+        "custom": "Custom address — type it below"
       }
     }
   },

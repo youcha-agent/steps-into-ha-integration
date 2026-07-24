@@ -21,14 +21,17 @@ servers, no account, no subscription.
 **1. Install this integration** from HACS, then restart Home Assistant.
 
 **2. Add a person:** Settings → Devices & Services → **Add Integration** → *Steps Into HA*.
-Type a name. Home Assistant creates a private webhook and shows you a QR code.
+Type a name. Home Assistant creates a private webhook for them.
 
-**3. Install [Steps Into HA][apprepo]** on that person's iPhone, allow Apple Health access,
+**3. Choose the address** their phone should send to — see below. Home Assistant then shows
+you a QR code.
+
+**4. Install [Steps Into HA][apprepo]** on that person's iPhone, allow Apple Health access,
 and scan the QR code.
 
 That's it. You get `sensor.<name>_steps`, updated about once an hour in the background.
 
-Repeat step 2 for each family member — one entry per phone.
+Repeat from step 2 for each family member — one entry per phone.
 
 > **Using an older version of the app** that asks for a "Home Assistant address" and a
 > "Webhook ID" in separate fields? Turn on **Advanced Mode** in your Home Assistant user
@@ -36,11 +39,26 @@ Repeat step 2 for each family member — one entry per phone.
 > pick something short enough to type. Make it unguessable — it's the only thing protecting
 > the sensor.
 
-### Nabu Casa users
+### Which address? (step 3)
 
-If you have a Home Assistant Cloud subscription, the integration automatically creates a
-**cloudhook** and puts that URL in the QR code. Your phone then syncs from anywhere with no
-port forwarding, no reverse proxy, and nothing exposed to the internet.
+The phone sends its step count from wherever it happens to be — the shops, work, school. So
+the address in the QR code has to reach Home Assistant **from outside your home**, or that
+person will only sync when they're on your Wi-Fi.
+
+| Option | Use it when |
+|---|---|
+| **Home Assistant Cloud** | You have a Nabu Casa subscription. A cloudhook is created for you: works from anywhere, no port forwarding, nothing exposed to the internet. Preselected when available. |
+| **External** | You've filled in Settings → System → Network → **External URL**. Preselected when there's no cloudhook. |
+| **Internal** | You only want syncing at home, or you're testing. |
+| **Custom** | You reach Home Assistant through a **reverse proxy, your own domain, DuckDNS or Tailscale** — addresses Home Assistant can't discover for itself. |
+
+Custom is the one to reach for if remote syncing isn't working. Home Assistant only knows
+about addresses you've told it about, so a proxy you set up outside of it won't appear in
+the list on its own. Paste just the base address — `https://ha.example.com` — and the
+webhook path is added for you.
+
+You can change this later from the integration's **Configure** button, which shows a fresh
+QR code to re-scan.
 
 ---
 

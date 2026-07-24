@@ -11,17 +11,27 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.steps_into_ha.config_flow import (
     async_resolve_webhook_url,
+    async_url_candidates,
+    normalize_custom_url,
     pairing_payload,
 )
 from custom_components.steps_into_ha.const import (
     CONF_CLOUDHOOK,
+    CONF_CUSTOM_URL,
     CONF_PERSON,
+    CONF_URL_SOURCE,
     CONF_WEBHOOK_ID,
     CONF_WEBHOOK_URL,
     DOMAIN,
+    URL_SOURCE_CLOUD,
+    URL_SOURCE_CUSTOM,
+    URL_SOURCE_EXTERNAL,
+    URL_SOURCE_INTERNAL,
 )
 
 from .conftest import CLOUDHOOK_URL, WEBHOOK_ID
+
+EXTERNAL_BASE = "https://ha.example.com"
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +41,32 @@ def mock_setup_entry():
         "custom_components.steps_into_ha.async_setup_entry", return_value=True
     ) as mock:
         yield mock
+
+
+async def _reach_url_step(hass, person: str = "Dad", **context):
+    """Run the name step and stop on the address picker."""
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user", **context}
+    )
+    return await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_PERSON: person}
+    )
+
+
+async def _accept_default_address(manager, result):
+    """Submit the address picker with whatever it preselected.
+
+    Takes the flow manager because the same picker is served by the config flow
+    (`hass.config_entries.flow`) and the options flow (`hass.config_entries.options`).
+    """
+    defaults = result["data_schema"]({})
+    return await manager.async_configure(
+        result["flow_id"],
+        {
+            CONF_URL_SOURCE: defaults[CONF_URL_SOURCE],
+            CONF_CUSTOM_URL: defaults[CONF_CUSTOM_URL],
+        },
+    )
 
 
 async def test_user_flow_generates_webhook(hass) -> None:
@@ -46,6 +82,10 @@ async def test_user_flow_generates_webhook(hass) -> None:
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_PERSON: "Dad"}
     )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "url"
+
+    result = await _accept_default_address(hass.config_entries.flow, result)
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "connect"
 
@@ -67,12 +107,8 @@ async def test_user_flow_generates_webhook(hass) -> None:
 
 async def test_name_is_trimmed(hass) -> None:
     """Leading/trailing whitespace in the name shouldn't reach the device registry."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_PERSON: "  Dad  "}
-    )
+    result = await _reach_url_step(hass, "  Dad  ")
+    result = await _accept_default_address(hass.config_entries.flow, result)
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     assert result["data"][CONF_PERSON] == "Dad"
 
@@ -99,6 +135,9 @@ async def test_advanced_mode_allows_custom_webhook_id(hass) -> None:
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_PERSON: "Dad", CONF_WEBHOOK_ID: "dad-4f2a91"}
     )
+    assert result["step_id"] == "url"
+
+    result = await _accept_default_address(hass.config_entries.flow, result)
     assert result["step_id"] == "connect"
 
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
@@ -138,12 +177,8 @@ async def test_duplicate_webhook_id_aborts(hass, config_entry) -> None:
 
 async def test_qr_encodes_pairing_payload(hass) -> None:
     """The QR carries versioned JSON so the app can prefill the name."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_PERSON: "Dad"}
-    )
+    result = await _reach_url_step(hass)
+    result = await _accept_default_address(hass.config_entries.flow, result)
 
     qr_selector = result["data_schema"].schema["qr"]
     payload = json.loads(qr_selector.config["data"])
@@ -200,17 +235,169 @@ async def test_cloud_error_falls_back_to_local(hass, mock_cloud, error: str) -> 
 
 async def test_cloudhook_url_stored_on_entry(hass, mock_cloud) -> None:
     """The full flow records that this entry owns a cloudhook, for cleanup later."""
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": "user"}
-    )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_PERSON: "Dad"}
-    )
+    result = await _reach_url_step(hass)
+    result = await _accept_default_address(hass.config_entries.flow, result)
     assert result["description_placeholders"]["url"] == CLOUDHOOK_URL
 
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     assert result["data"][CONF_WEBHOOK_URL] == CLOUDHOOK_URL
     assert result["data"][CONF_CLOUDHOOK] is True
+    assert result["data"][CONF_URL_SOURCE] == URL_SOURCE_CLOUD
+
+
+# ---------------------------------------------------------------------------
+# Choosing the address
+# ---------------------------------------------------------------------------
+
+
+async def test_candidates_omit_external_when_unset(hass) -> None:
+    """Most installs never fill in the external URL; don't offer one that isn't there."""
+    candidates = await async_url_candidates(hass, WEBHOOK_ID)
+
+    assert URL_SOURCE_EXTERNAL not in candidates
+    assert candidates[URL_SOURCE_INTERNAL] == (
+        f"http://10.0.0.2:8123/api/webhook/{WEBHOOK_ID}"
+    )
+    assert URL_SOURCE_CLOUD not in candidates
+
+
+async def test_candidates_include_external_when_set(hass) -> None:
+    """Both addresses are offered when Home Assistant knows both."""
+    hass.config.external_url = EXTERNAL_BASE
+
+    candidates = await async_url_candidates(hass, WEBHOOK_ID)
+
+    assert candidates[URL_SOURCE_EXTERNAL] == f"{EXTERNAL_BASE}/api/webhook/{WEBHOOK_ID}"
+    assert candidates[URL_SOURCE_INTERNAL] == (
+        f"http://10.0.0.2:8123/api/webhook/{WEBHOOK_ID}"
+    )
+
+
+async def test_candidates_include_cloudhook_when_subscribed(hass, mock_cloud) -> None:
+    """A cloudhook is a candidate in its own right, not a replacement for the others."""
+    candidates = await async_url_candidates(hass, WEBHOOK_ID)
+
+    assert candidates[URL_SOURCE_CLOUD] == CLOUDHOOK_URL
+    assert URL_SOURCE_INTERNAL in candidates
+
+
+async def test_external_is_preselected(hass) -> None:
+    """The whole point: if there's an address that works from outside, default to it."""
+    hass.config.external_url = EXTERNAL_BASE
+
+    result = await _reach_url_step(hass)
+
+    assert result["step_id"] == "url"
+    assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_EXTERNAL
+
+
+async def test_cloud_is_preselected_over_external(hass, mock_cloud) -> None:
+    """A cloudhook needs no port forwarding at all, so it outranks a plain domain."""
+    hass.config.external_url = EXTERNAL_BASE
+
+    result = await _reach_url_step(hass)
+
+    assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_CLOUD
+
+
+async def test_internal_is_preselected_when_nothing_else(hass) -> None:
+    """With no external address there's nothing better to offer — but it is a choice."""
+    result = await _reach_url_step(hass)
+
+    assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_INTERNAL
+
+
+async def test_choosing_external_puts_it_in_the_qr(hass) -> None:
+    """Picking external must actually change what the phone gets handed."""
+    hass.config.external_url = EXTERNAL_BASE
+    result = await _reach_url_step(hass)
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_URL_SOURCE: URL_SOURCE_EXTERNAL}
+    )
+    webhook_id = result["description_placeholders"]["webhook_id"]
+    expected = f"{EXTERNAL_BASE}/api/webhook/{webhook_id}"
+
+    payload = json.loads(result["data_schema"].schema["qr"].config["data"])
+    assert payload["url"] == expected
+
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["data"][CONF_WEBHOOK_URL] == expected
+    assert result["data"][CONF_URL_SOURCE] == URL_SOURCE_EXTERNAL
+    assert result["data"][CONF_CLOUDHOOK] is False
+
+
+async def test_custom_base_url_gets_the_webhook_path(hass) -> None:
+    """Pasting what's in the browser address bar is the obvious thing to do."""
+    result = await _reach_url_step(hass)
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"],
+        {CONF_URL_SOURCE: URL_SOURCE_CUSTOM, CONF_CUSTOM_URL: "https://ha.example.com/"},
+    )
+    assert result["step_id"] == "connect"
+
+    webhook_id = result["description_placeholders"]["webhook_id"]
+    assert result["description_placeholders"]["url"] == (
+        f"https://ha.example.com/api/webhook/{webhook_id}"
+    )
+
+
+async def test_custom_full_url_is_left_alone(hass) -> None:
+    """Someone who pastes the complete endpoint must not get the path twice."""
+    # Advanced mode so the webhook ID is known before the address is chosen.
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": "user", "show_advanced_options": True}
+    )
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_PERSON: "Dad", CONF_WEBHOOK_ID: "dad-4f2a91"}
+    )
+    full = "https://ha.example.com/api/webhook/dad-4f2a91"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_URL_SOURCE: URL_SOURCE_CUSTOM, CONF_CUSTOM_URL: full}
+    )
+    assert result["description_placeholders"]["url"] == full
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["homeassistant.local:8123", "file:///etc/passwd", "https://"],
+    ids=["no_scheme", "wrong_scheme", "no_host"],
+)
+async def test_invalid_custom_url_rejected(hass, bad: str) -> None:
+    """A bad address here means a phone that silently never syncs."""
+    result = await _reach_url_step(hass)
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_URL_SOURCE: URL_SOURCE_CUSTOM, CONF_CUSTOM_URL: bad}
+    )
+    assert result["type"] is FlowResultType.FORM
+    assert result["step_id"] == "url"
+    assert result["errors"] == {CONF_CUSTOM_URL: "invalid_url"}
+
+
+@pytest.mark.parametrize("empty", ["", "   "], ids=["empty", "whitespace"])
+async def test_custom_selected_without_a_url(hass, empty: str) -> None:
+    """Picking Custom and leaving the box empty is a different mistake to a bad URL."""
+    result = await _reach_url_step(hass)
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {CONF_URL_SOURCE: URL_SOURCE_CUSTOM, CONF_CUSTOM_URL: empty}
+    )
+    assert result["errors"] == {CONF_CUSTOM_URL: "custom_url_required"}
+
+
+def test_normalize_custom_url_trims_trailing_slashes() -> None:
+    """No double slash before the webhook path."""
+    assert normalize_custom_url("https://ha.example.com///", "abc") == (
+        "https://ha.example.com/api/webhook/abc"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Options flow
+# ---------------------------------------------------------------------------
 
 
 async def test_options_flow_reshows_qr(hass, config_entry: MockConfigEntry) -> None:
@@ -221,6 +408,9 @@ async def test_options_flow_reshows_qr(hass, config_entry: MockConfigEntry) -> N
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "init"
     assert result["description_placeholders"]["person"] == "Dad"
+
+    result = await _accept_default_address(hass.config_entries.options, result)
+    assert result["step_id"] == "connect"
     assert "qr" in result["data_schema"].schema
 
 
@@ -232,7 +422,67 @@ async def test_options_flow_refreshes_changed_url(
     hass.config.internal_url = "http://10.0.0.9:8123"
 
     result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    result = await _accept_default_address(hass.config_entries.options, result)
 
     expected = f"http://10.0.0.9:8123/api/webhook/{WEBHOOK_ID}"
     assert result["description_placeholders"]["url"] == expected
     assert config_entry.data[CONF_WEBHOOK_URL] == expected
+
+
+async def test_options_flow_preselects_stored_source(
+    hass, config_entry: MockConfigEntry
+) -> None:
+    """Re-opening Configure comes back on the choice that was made, not the default."""
+    config_entry.add_to_hass(hass)
+    hass.config.external_url = EXTERNAL_BASE
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={**config_entry.data, CONF_URL_SOURCE: URL_SOURCE_INTERNAL},
+    )
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    # External exists and would otherwise win — the stored choice has to beat it.
+    assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_INTERNAL
+
+
+async def test_options_flow_keeps_a_custom_url(
+    hass, config_entry: MockConfigEntry
+) -> None:
+    """The regression this exists to prevent: Configure used to clobber a custom URL."""
+    config_entry.add_to_hass(hass)
+    custom = f"https://ha.example.com/api/webhook/{WEBHOOK_ID}"
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={
+            **config_entry.data,
+            CONF_WEBHOOK_URL: custom,
+            CONF_URL_SOURCE: URL_SOURCE_CUSTOM,
+            CONF_CUSTOM_URL: custom,
+        },
+    )
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+    assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_CUSTOM
+    assert result["data_schema"]({})[CONF_CUSTOM_URL] == custom
+
+    result = await _accept_default_address(hass.config_entries.options, result)
+    assert result["description_placeholders"]["url"] == custom
+    assert config_entry.data[CONF_WEBHOOK_URL] == custom
+
+
+async def test_options_flow_falls_back_when_source_vanishes(
+    hass, config_entry: MockConfigEntry
+) -> None:
+    """A lapsed subscription shouldn't strand the entry on an address that's gone."""
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={**config_entry.data, CONF_URL_SOURCE: URL_SOURCE_CLOUD},
+    )
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_INTERNAL
+    assert result["description_placeholders"]["notice"]
+

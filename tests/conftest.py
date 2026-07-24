@@ -13,9 +13,11 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.steps_into_ha.const import (
     CONF_CLOUDHOOK,
     CONF_PERSON,
+    CONF_URL_SOURCE,
     CONF_WEBHOOK_ID,
     CONF_WEBHOOK_URL,
     DOMAIN,
+    URL_SOURCE_AUTO,
 )
 
 WEBHOOK_ID = "0123456789abcdef0123456789abcdef"
@@ -38,7 +40,7 @@ def known_urls(hass):
 
 @pytest.fixture
 def config_entry() -> MockConfigEntry:
-    """A configured person."""
+    """A configured person, as written by a version before the address was a choice."""
     return MockConfigEntry(
         domain=DOMAIN,
         title=PERSON,
@@ -48,6 +50,7 @@ def config_entry() -> MockConfigEntry:
             CONF_WEBHOOK_ID: WEBHOOK_ID,
             CONF_WEBHOOK_URL: f"http://10.0.0.2:8123/api/webhook/{WEBHOOK_ID}",
             CONF_CLOUDHOOK: False,
+            CONF_URL_SOURCE: URL_SOURCE_AUTO,
         },
     )
 

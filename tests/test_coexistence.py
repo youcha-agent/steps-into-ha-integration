@@ -152,6 +152,11 @@ async def test_generated_ids_never_collide_with_yaml(hass, yaml_webhook):
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {CONF_PERSON: "Dad"}
     )
+    assert result["step_id"] == "url"
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], result["data_schema"]({})
+    )
 
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "connect"

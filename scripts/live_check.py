@@ -61,6 +61,17 @@ async def main():
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"], {"person": "Dad"}
     )
+    check("flow reaches address step", result["step_id"] == "url")
+
+    # Only the internal URL is configured here, so that's what the picker preselects.
+    defaults = result["data_schema"]({})
+    check(
+        "internal address preselected",
+        defaults["url_source"] == "internal",
+        defaults["url_source"],
+    )
+
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], defaults)
     check("flow reaches connect step", result["step_id"] == "connect")
 
     url = result["description_placeholders"]["url"]
@@ -133,6 +144,42 @@ async def main():
             "webhook id stable across restart",
             entries[0].data["webhook_id"] == webhook_id,
         )
+        check(
+            "address choice recorded on entry",
+            entries[0].data.get("url_source") == "internal",
+            entries[0].data.get("url_source"),
+        )
+
+        # ---------- change the address, and check it sticks ----------
+        # The reason this exists: Configure used to recompute the URL and overwrite
+        # whatever was stored, silently reverting a deliberate choice on every visit.
+        custom = f"https://ha.example.com/api/webhook/{webhook_id}"
+        result = await hass.config_entries.options.async_init(entries[0].entry_id)
+        check("options flow opens on the picker", result["step_id"] == "init")
+
+        result = await hass.config_entries.options.async_configure(
+            result["flow_id"], {"url_source": "custom", "custom_url": custom}
+        )
+        check("options flow reaches connect step", result["step_id"] == "connect")
+        check(
+            "custom address lands in the QR",
+            json.loads(result["data_schema"].schema["qr"].config["data"])["url"]
+            == custom,
+        )
+
+        await hass.config_entries.options.async_configure(result["flow_id"], {})
+        await hass.async_block_till_done()
+
+        # Re-open it: the stored choice must win over the internal URL, which is still
+        # the only address Home Assistant can discover for itself.
+        result = await hass.config_entries.options.async_init(entries[0].entry_id)
+        defaults = result["data_schema"]({})
+        check(
+            "custom address survives re-opening Configure",
+            defaults["url_source"] == "custom" and defaults["custom_url"] == custom,
+            f"{defaults['url_source']} / {defaults['custom_url']}",
+        )
+        hass.config_entries.options.async_abort(result["flow_id"])
 
     await hass.async_stop()
 
