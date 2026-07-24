@@ -4,9 +4,13 @@
 [![Validate][validate-badge]][validate]
 
 Puts your iPhone's **daily step count** on your Home Assistant dashboard, so you can build a
-family step leaderboard. Pairs with the [**Steps Into HA**][appstore] iOS app, which reads
+family step leaderboard. Pairs with the [**Steps Into HA**][apprepo] iOS app, which reads
 your step count from Apple Health and pushes it to your own Home Assistant — no third-party
 servers, no account, no subscription.
+
+> **The iOS app is awaiting App Store review.** This integration works today with any build
+> of the app — see the note under step 3 if yours asks for the address and webhook ID as
+> separate fields.
 
 <!-- TODO: screenshot of the QR pairing step and a family bar chart -->
 
@@ -19,7 +23,7 @@ servers, no account, no subscription.
 **2. Add a person:** Settings → Devices & Services → **Add Integration** → *Steps Into HA*.
 Type a name. Home Assistant creates a private webhook and shows you a QR code.
 
-**3. Install [Steps Into HA][appstore]** on that person's iPhone, allow Apple Health access,
+**3. Install [Steps Into HA][apprepo]** on that person's iPhone, allow Apple Health access,
 and scan the QR code.
 
 That's it. You get `sensor.<name>_steps`, updated about once an hour in the background.
@@ -161,9 +165,8 @@ PATH="$PWD/.venv/bin:$PATH" ./scripts/run_live_check.sh
 
 ## Related
 
-- [Steps Into HA iOS app][appstore] — [source][apprepo]
+- [Steps Into HA iOS app][apprepo] — App Store listing pending review
 
-[appstore]: https://apps.apple.com/app/steps-into-ha
 [apprepo]: https://github.com/youcha-agent/steps-into-ha
 [privacy]: https://github.com/youcha-agent/steps-into-ha/blob/main/PRIVACY.md
 [apexcharts]: https://github.com/RomRider/apexcharts-card
