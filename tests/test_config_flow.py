@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import patch
+from contextlib import contextmanager
+from unittest.mock import Mock, patch
 
 import pytest
+import yarl
 from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers.http import current_request
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.steps_into_ha.config_flow import (
     async_resolve_webhook_url,
     async_url_candidates,
+    is_home_only_url,
     normalize_custom_url,
     pairing_payload,
 )
@@ -25,6 +29,7 @@ from custom_components.steps_into_ha.const import (
     DOMAIN,
     URL_SOURCE_CLOUD,
     URL_SOURCE_CUSTOM,
+    URL_SOURCE_DETECTED,
     URL_SOURCE_EXTERNAL,
     URL_SOURCE_INTERNAL,
 )
@@ -32,6 +37,23 @@ from custom_components.steps_into_ha.const import (
 from .conftest import CLOUDHOOK_URL, WEBHOOK_ID
 
 EXTERNAL_BASE = "https://ha.example.com"
+PROXY_BASE = "https://ha.proxy.example.com"
+
+
+@contextmanager
+def browsing_at(url: str, **headers: str):
+    """Run the block as if the admin had loaded the page at `url`.
+
+    The config flow is served over the REST API, so `current_request` is set for real in
+    production. Tests and scripts drive the flow with no request in context at all, which
+    is why every test that doesn't use this sees no detected address.
+    """
+    request = Mock(url=yarl.URL(url), headers=headers)
+    token = current_request.set(request)
+    try:
+        yield
+    finally:
+        current_request.reset(token)
 
 
 @pytest.fixture(autouse=True)
@@ -568,3 +590,192 @@ async def test_options_flow_falls_back_when_source_vanishes(
     assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_CUSTOM
     assert result["description_placeholders"]["notice"]
 
+
+# ---------------------------------------------------------------------------
+# The address the browser is using
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("url", "expected"),
+    [
+        ("http://192.168.1.5:8123/api/webhook/x", True),
+        ("http://10.0.0.2:8123/api/webhook/x", True),
+        ("http://172.20.0.4:8123/api/webhook/x", True),
+        ("http://127.0.0.1:8123/api/webhook/x", True),
+        ("http://169.254.4.4:8123/api/webhook/x", True),
+        ("http://homeassistant.local:8123/api/webhook/x", True),
+        ("http://localhost:8123/api/webhook/x", True),
+        ("https://ha.example.com/api/webhook/x", False),
+        # A hostname that merely starts like a private range is not one.
+        ("https://10.example.com/api/webhook/x", False),
+        ("", False),
+    ],
+)
+def test_is_home_only_url(url: str, expected: bool) -> None:
+    """Same rule as WebhookURL.isHomeOnly in the app, so both ends agree."""
+    assert is_home_only_url(url) is expected
+
+
+async def test_detected_address_offered_when_no_external_url(hass) -> None:
+    """The reason this exists, reported from a real setup.
+
+    Home Assistant behind a reverse proxy it was never told about has no external URL to
+    find — but the admin is looking at this very form through that proxy, so the request
+    carries the address `hass.config` doesn't have.
+    """
+    with browsing_at(f"{PROXY_BASE}/config/integrations"):
+        candidates = await async_url_candidates(hass, WEBHOOK_ID)
+
+    assert candidates[URL_SOURCE_DETECTED] == f"{PROXY_BASE}/api/webhook/{WEBHOOK_ID}"
+    assert URL_SOURCE_EXTERNAL not in candidates
+
+
+async def test_detected_address_is_preselected_and_named(hass) -> None:
+    """It has to land on it, not merely offer it — an empty Custom box is where we were."""
+    with browsing_at(f"{PROXY_BASE}/config/integrations"):
+        result = await _reach_url_step(hass)
+
+    assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_DETECTED
+    addresses = result["description_placeholders"]["addresses"]
+    assert PROXY_BASE in addresses
+    # Something here works away from home now, so the warning must stand down.
+    assert "away from home" not in addresses
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://192.168.1.5:8123/",
+        "http://homeassistant.local:8123/",
+        "http://localhost:8123/",
+    ],
+)
+async def test_detected_address_skipped_when_home_only(hass, url: str) -> None:
+    """Browsing from the sofa detects the internal address, which helps nobody."""
+    with browsing_at(url):
+        candidates = await async_url_candidates(hass, WEBHOOK_ID)
+
+    assert URL_SOURCE_DETECTED not in candidates
+
+
+async def test_detected_address_skipped_when_it_duplicates_another(hass) -> None:
+    """Once the external URL is configured, this is usually the same address again."""
+    hass.config.external_url = EXTERNAL_BASE
+
+    with browsing_at(f"{EXTERNAL_BASE}/config/integrations"):
+        candidates = await async_url_candidates(hass, WEBHOOK_ID)
+
+    assert URL_SOURCE_DETECTED not in candidates
+    assert candidates[URL_SOURCE_EXTERNAL] == (
+        f"{EXTERNAL_BASE}/api/webhook/{WEBHOOK_ID}"
+    )
+
+
+async def test_detected_address_prefers_forwarded_headers(hass) -> None:
+    """The common case: a proxy that terminates TLS and Home Assistant not told about it.
+
+    Without `use_x_forwarded_for` and `trusted_proxies`, Home Assistant's own middleware
+    doesn't rewrite the request — so the connection reads as plain http to an internal
+    host, and only the headers know what the browser actually used.
+    """
+    with browsing_at(
+        "http://10.0.0.2:8123/config/integrations",
+        **{
+            "X-Forwarded-Proto": "https",
+            "X-Forwarded-Host": "ha.proxy.example.com",
+        },
+    ):
+        candidates = await async_url_candidates(hass, WEBHOOK_ID)
+
+    assert candidates[URL_SOURCE_DETECTED] == f"{PROXY_BASE}/api/webhook/{WEBHOOK_ID}"
+
+
+async def test_choosing_detected_stores_it_as_a_custom_address(hass) -> None:
+    """Picked once, frozen — `detected` is never written to the entry.
+
+    It comes off a request header, so leaving it as the stored source would let a later
+    visit to Configure from a different address silently re-point a working phone.
+    """
+    with browsing_at(f"{PROXY_BASE}/config/integrations"):
+        result = await _reach_url_step(hass)
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_URL_SOURCE: URL_SOURCE_DETECTED}
+        )
+
+        webhook_id = result["description_placeholders"]["webhook_id"]
+        expected = f"{PROXY_BASE}/api/webhook/{webhook_id}"
+        payload = json.loads(result["data_schema"].schema["qr"].config["data"])
+        assert payload["url"] == expected
+
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+
+    assert result["data"][CONF_WEBHOOK_URL] == expected
+    assert result["data"][CONF_URL_SOURCE] == URL_SOURCE_CUSTOM
+    assert result["data"][CONF_CUSTOM_URL] == expected
+    assert result["data"][CONF_CLOUDHOOK] is False
+
+
+async def test_detected_address_survives_configure_from_elsewhere(
+    hass, config_entry: MockConfigEntry
+) -> None:
+    """Having been frozen as custom, a later visit from another address can't move it."""
+    config_entry.add_to_hass(hass)
+    paired = f"{PROXY_BASE}/api/webhook/{WEBHOOK_ID}"
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={
+            **config_entry.data,
+            CONF_WEBHOOK_URL: paired,
+            CONF_URL_SOURCE: URL_SOURCE_CUSTOM,
+            CONF_CUSTOM_URL: paired,
+        },
+    )
+
+    with browsing_at("https://other.example.com/config/integrations"):
+        result = await hass.config_entries.options.async_init(config_entry.entry_id)
+        assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_CUSTOM
+        assert result["data_schema"]({})[CONF_CUSTOM_URL] == paired
+
+        result = await _accept_default_address(hass.config_entries.options, result)
+
+    assert result["description_placeholders"]["url"] == paired
+    assert config_entry.data[CONF_WEBHOOK_URL] == paired
+
+
+async def test_custom_box_is_never_prefilled_with_a_home_only_address(
+    hass, config_entry: MockConfigEntry
+) -> None:
+    """The second half of what was reported: Custom arrived pre-loaded with 192.168.x.x.
+
+    Selecting Custom and pressing Submit then stored a home-only address as a deliberate
+    custom choice — straight around the guard that exists to prevent exactly that.
+    """
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={**config_entry.data, CONF_URL_SOURCE: URL_SOURCE_INTERNAL},
+    )
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_INTERNAL
+    assert result["data_schema"]({})[CONF_CUSTOM_URL] == ""
+
+
+async def test_custom_box_is_prefilled_with_the_detected_address(
+    hass, config_entry: MockConfigEntry
+) -> None:
+    """One click from an entry stuck on internal to the address that actually works."""
+    config_entry.add_to_hass(hass)
+    hass.config_entries.async_update_entry(
+        config_entry,
+        data={**config_entry.data, CONF_URL_SOURCE: URL_SOURCE_INTERNAL},
+    )
+
+    with browsing_at(f"{PROXY_BASE}/config/integrations"):
+        result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    assert result["data_schema"]({})[CONF_CUSTOM_URL] == (
+        f"{PROXY_BASE}/api/webhook/{WEBHOOK_ID}"
+    )

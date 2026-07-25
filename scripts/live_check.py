@@ -139,6 +139,90 @@ async def main():
             hass.states.get(entity_id).state == "8432",
         )
 
+    # ---------- the flow over real HTTP, through a "reverse proxy" ----------
+    # The one thing the in-process flow above cannot prove. Detecting the browser's
+    # address depends on `current_request` being populated while the config flow runs,
+    # which only happens when the frontend drives it over the REST API. So drive it that
+    # way, with a Host header standing in for a proxy Home Assistant knows nothing about.
+    if await async_setup_component(hass, "config", {}):
+        user = await hass.auth.async_create_user("Live Check", group_ids=["system-admin"])
+        refresh_token = await hass.auth.async_create_refresh_token(user, client_id=BASE)
+        headers = {
+            "Authorization": f"Bearer {hass.auth.async_create_access_token(refresh_token)}",
+            "Host": "ha.proxy.example.com",
+        }
+        flow_url = f"{BASE}/api/config/config_entries/flow"
+
+        async with aiohttp.ClientSession(headers=headers) as session:
+            async with session.post(flow_url, json={"handler": "steps_into_ha"}) as resp:
+                step = await resp.json()
+            check("flow over REST opens", step.get("step_id") == "user", step)
+
+            async with session.post(
+                f"{flow_url}/{step['flow_id']}", json={"person": "Proxy"}
+            ) as resp:
+                step = await resp.json()
+
+            fields = {f["name"]: f for f in step.get("data_schema", [])}
+            options = fields.get("url_source", {}).get("selector", {}).get(
+                "select", {}
+            ).get("options", [])
+            check(
+                "proxy address detected from the request",
+                "detected" in options,
+                options,
+            )
+            check(
+                "detected address is preselected",
+                fields.get("url_source", {}).get("default") == "detected",
+                fields.get("url_source", {}).get("default"),
+            )
+            check(
+                "proxy host named in the form",
+                "ha.proxy.example.com"
+                in step.get("description_placeholders", {}).get("addresses", ""),
+                step.get("description_placeholders", {}).get("addresses"),
+            )
+            # Choosing it must freeze it as a custom address rather than store a source
+            # that would be re-derived from a header on some later visit.
+            async with session.post(
+                f"{flow_url}/{step['flow_id']}", json={"url_source": "detected"}
+            ) as resp:
+                step = await resp.json()
+            detected_url = step.get("description_placeholders", {}).get("url", "")
+            check(
+                "detected address lands in the QR",
+                detected_url.startswith("http://ha.proxy.example.com/api/webhook/"),
+                detected_url,
+            )
+
+            async with session.post(f"{flow_url}/{step['flow_id']}", json={}) as resp:
+                await resp.json()
+            await hass.async_block_till_done()
+
+        # Read the entry itself — the REST response doesn't carry the entry data, and
+        # what's on disk is the thing that matters here anyway.
+        proxy_entry = next(
+            (
+                entry
+                for entry in hass.config_entries.async_entries("steps_into_ha")
+                if entry.title == "Proxy"
+            ),
+            None,
+        )
+        stored = proxy_entry.data if proxy_entry else {}
+        check(
+            "detected choice frozen as a custom address",
+            stored.get("url_source") == "custom"
+            and stored.get("custom_url") == detected_url,
+            f"{stored.get('url_source')} / {stored.get('custom_url')}",
+        )
+
+        # Tidy up: the restart checks below are about the one person added first.
+        if proxy_entry:
+            await hass.config_entries.async_remove(proxy_entry.entry_id)
+            await hass.async_block_till_done()
+
     # ---------- restart ----------
     await hass.async_stop()
 

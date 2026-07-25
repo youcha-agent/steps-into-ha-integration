@@ -15,14 +15,14 @@
       },
       "url": {
         "title": "Which address should {person}'s phone use?",
-        "description": "The phone sends steps from wherever it happens to be — the shops, work, a friend's house. So pick an address that reaches Home Assistant from outside your home, or it will only sync when {person} is on your Wi-Fi.\n\nAddresses Home Assistant knows about:\n\n{addresses}{notice}",
+        "description": "The phone sends steps from wherever it happens to be — the shops, work, a friend's house. So pick an address that reaches Home Assistant from outside your home, or it will only sync when {person} is on your Wi-Fi.\n\nAddresses that reach Home Assistant:\n\n{addresses}{notice}",
         "data": {
           "url_source": "Address to use",
           "custom_url": "Custom address"
         },
         "data_description": {
-          "url_source": "Home Assistant Cloud and External work from anywhere. Internal only works at home.",
-          "custom_url": "Only used when you pick **Custom** above. Choose this if you reach Home Assistant through a reverse proxy, your own domain, DuckDNS or Tailscale — addresses Home Assistant can't discover on its own. Paste the same address you use in your browser; you can leave the webhook path off and it will be added for you."
+          "url_source": "Home Assistant Cloud, External, and the address this browser is using all work from anywhere. Internal only works at home.",
+          "custom_url": "Only used when you pick **Custom** above. Choose this if you reach Home Assistant through a reverse proxy, your own domain, DuckDNS or Tailscale — Home Assistant only knows an address you have given it under Settings › System › Network. Paste the same address you use in your browser; you can leave the webhook path off and it will be added for you."
         }
       },
       "connect": {
@@ -49,14 +49,14 @@
     "step": {
       "init": {
         "title": "Which address should {person}'s phone use?",
-        "description": "Change this if {person}'s phone stopped syncing when away from home, or if your Home Assistant address has moved.\n\nAddresses Home Assistant knows about:\n\n{addresses}{notice}",
+        "description": "Change this if {person}'s phone stopped syncing when away from home, or if your Home Assistant address has moved.\n\nAddresses that reach Home Assistant:\n\n{addresses}{notice}",
         "data": {
           "url_source": "Address to use",
           "custom_url": "Custom address"
         },
         "data_description": {
-          "url_source": "Home Assistant Cloud and External work from anywhere. Internal only works at home.",
-          "custom_url": "Only used when you pick **Custom** above. Choose this if you reach Home Assistant through a reverse proxy, your own domain, DuckDNS or Tailscale — addresses Home Assistant can't discover on its own. Paste the same address you use in your browser; you can leave the webhook path off and it will be added for you."
+          "url_source": "Home Assistant Cloud, External, and the address this browser is using all work from anywhere. Internal only works at home.",
+          "custom_url": "Only used when you pick **Custom** above. Choose this if you reach Home Assistant through a reverse proxy, your own domain, DuckDNS or Tailscale — Home Assistant only knows an address you have given it under Settings › System › Network. Paste the same address you use in your browser; you can leave the webhook path off and it will be added for you."
         }
       },
       "connect": {
@@ -73,6 +73,7 @@
       "options": {
         "cloud": "Home Assistant Cloud — works from anywhere",
         "external": "External address — works from anywhere",
+        "detected": "The address you're using right now — works from wherever this browser is",
         "internal": "Internal address — only works at home",
         "custom": "Custom address — type it below"
       }

@@ -10,10 +10,12 @@ from __future__ import annotations
 import json
 import re
 from contextlib import suppress
+from ipaddress import ip_address
 from typing import Any
 from urllib.parse import urlsplit
 
 import voluptuous as vol
+import yarl
 from homeassistant.components import webhook
 from homeassistant.config_entries import (
     ConfigEntry,
@@ -23,7 +25,9 @@ from homeassistant.config_entries import (
 )
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import selector
+from homeassistant.helpers.http import current_request
 from homeassistant.helpers.network import NoURLAvailableError, get_url
+from homeassistant.util.network import is_ip_address, is_local
 
 from .const import (
     CONF_CLOUDHOOK,
@@ -37,6 +41,7 @@ from .const import (
     URL_SOURCE_AUTO,
     URL_SOURCE_CLOUD,
     URL_SOURCE_CUSTOM,
+    URL_SOURCE_DETECTED,
     URL_SOURCE_EXTERNAL,
     URL_SOURCE_INTERNAL,
     URL_SOURCE_PREFERENCE,
@@ -98,6 +103,74 @@ async def async_resolve_webhook_url(
     return webhook.async_generate_url(hass, webhook_id), False
 
 
+def is_home_only_url(url: str) -> bool:
+    """Whether this address can only be reached from the home network.
+
+    Mirrors `WebhookURL.isHomeOnly` in the iOS app, so both ends agree on what counts as
+    home-only. Home Assistant's own helpers do the IP work — `is_local` covers loopback,
+    the private ranges and link-local in one call — leaving only the two hostname forms
+    that resolve on the local link and nowhere else.
+    """
+    host = (urlsplit(url).hostname or "").lower()
+    if not host:
+        return False
+    if host == "localhost" or host.endswith(".local"):
+        return True
+    return is_ip_address(host) and is_local(ip_address(host))
+
+
+def _forwarded_first(request: Any, header: str) -> str | None:
+    """The client-facing entry of an `X-Forwarded-*` header, if it's set.
+
+    Proxies append as a request travels inward, so the outermost proxy — the one the
+    browser actually talked to — is the first entry. Home Assistant's own forwarded
+    middleware takes the *last* one, because it wants the hop nearest itself; we want the
+    opposite end of the chain, since the point is to hand the phone the address a client
+    outside the house would use.
+    """
+    raw = request.headers.get(header)
+    if not raw:
+        return None
+    return raw.split(",")[0].strip() or None
+
+
+def current_request_base() -> str | None:
+    """The address the admin's browser is using right now, as `scheme://host[:port]`.
+
+    Returns None when there is no request in context — the flow driven from a test, a
+    script, or anything other than the REST call the frontend makes. Callers treat that
+    as "nothing detected" and carry on, so this can never be the reason a flow fails.
+
+    Why bother: someone reaching Home Assistant through a reverse proxy it was never told
+    about has no external URL for `get_url` to find, yet they are sitting on the setup
+    page *at* that address. The request knows what `hass.config` doesn't.
+
+    `request.url` is already correct when Home Assistant's forwarded middleware is active
+    (`use_x_forwarded_for` plus `trusted_proxies`). It very often isn't, and then the
+    scheme reads `http` even though the browser is on `https`, or the host has been
+    rewritten to something internal — so the headers win where they exist.
+    """
+    if (request := current_request.get()) is None:
+        return None
+
+    try:
+        origin = request.url.origin()
+    except ValueError:  # A relative URL; aiohttp shouldn't produce one here.
+        return None
+
+    if (proto := _forwarded_first(request, "X-Forwarded-Proto")) in ("http", "https"):
+        origin = origin.with_scheme(proto)
+
+    if host := _forwarded_first(request, "X-Forwarded-Host"):
+        with suppress(ValueError):
+            origin = yarl.URL(f"{origin.scheme}://{host}")
+
+    if origin.scheme not in ("http", "https") or not origin.host:
+        return None
+
+    return str(origin)
+
+
 async def async_url_candidates(
     hass: HomeAssistant, webhook_id: str
 ) -> dict[str, str]:
@@ -108,6 +181,9 @@ async def async_url_candidates(
     through a reverse proxy it doesn't know about silently gets the internal address,
     which then only works at home. Listing the candidates explicitly turns that into a
     visible choice instead of a surprise.
+
+    That same person is usually looking at this form *through* the proxy, so the live
+    request carries the address Home Assistant can't discover — offered as `detected`.
     """
     candidates: dict[str, str] = {}
 
@@ -125,6 +201,17 @@ async def async_url_candidates(
         candidates[URL_SOURCE_INTERNAL] = (
             get_url(hass, allow_external=False, allow_cloud=False) + path
         )
+
+    # Last, so the duplicate check below can see every other address. Ordering in the
+    # form comes from URL_SOURCE_PREFERENCE, not from this dict.
+    if (base := current_request_base()) is not None:
+        detected = base + path
+        # Two guards, both load-bearing. An admin on the home Wi-Fi is browsing the
+        # internal address, which is no more use away from home for having been detected;
+        # and where an external URL *is* configured this is usually that same address
+        # again, which would list one endpoint twice under two names.
+        if not is_home_only_url(detected) and detected not in candidates.values():
+            candidates[URL_SOURCE_DETECTED] = detected
 
     return candidates
 
@@ -249,6 +336,7 @@ def _address_list(candidates: dict[str, str]) -> str:
     labels = {
         URL_SOURCE_CLOUD: "Home Assistant Cloud",
         URL_SOURCE_EXTERNAL: "External",
+        URL_SOURCE_DETECTED: "This browser's address",
         URL_SOURCE_INTERNAL: "Internal",
     }
     lines = [
@@ -267,9 +355,36 @@ def _address_list(candidates: dict[str, str]) -> str:
             " from outside — a reverse proxy, your own domain, DuckDNS, Tailscale — pick"
             " **Custom** below and paste that address. Otherwise choose **Internal** and"
             " steps will sync on your home Wi-Fi only."
+            "\n\nHome Assistant only knows an address you have given it. Setting one under"
+            " Settings › System › Network › Internet makes it appear here, and fixes this"
+            " everywhere else too."
         )
 
     return "\n".join(lines)
+
+
+def _default_custom_url(
+    stored: str, candidates: dict[str, str], default_source: str
+) -> str:
+    """What to put in the Custom box before anyone has typed in it.
+
+    The box used to be seeded with whichever address was selected, which meant that on a
+    setup with no external URL it arrived pre-loaded with `192.168.x.x`. Clicking Custom
+    and pressing Submit then stored a home-only address as a deliberate custom choice —
+    around the outside of the guard that exists to stop exactly that.
+
+    So: a custom address that was actually chosen wins, then the detected one, then the
+    selected candidate but only while it still works away from home. A `custom_url` left
+    on an entry whose source is something else is just stale box contents, not a choice,
+    and is not worth resurrecting a home-only address for.
+    """
+    if default_source == URL_SOURCE_CUSTOM:
+        # A saved custom address is deliberate — show it even if it is home-only.
+        return stored or candidates.get(URL_SOURCE_DETECTED, "")
+    if detected := candidates.get(URL_SOURCE_DETECTED):
+        return detected
+    selected = candidates.get(default_source, "")
+    return "" if is_home_only_url(selected) else selected
 
 
 class _UrlChoiceMixin:
@@ -322,7 +437,9 @@ class _UrlChoiceMixin:
                 " after saving."
             )
 
-        default_custom = self._custom_url or candidates.get(default_source, "")
+        default_custom = _default_custom_url(
+            self._custom_url, candidates, default_source
+        )
         if user_input is not None:
             # Keep what they typed when re-rendering after a validation error.
             default_source = user_input.get(CONF_URL_SOURCE, default_source)
@@ -359,6 +476,15 @@ class _UrlChoiceMixin:
             # Only reachable if the address disappeared between rendering the form and
             # submitting it.
             return {CONF_URL_SOURCE: "url_unavailable"}
+
+        if source == URL_SOURCE_DETECTED:
+            # Freeze it. `detected` comes off a request header, so leaving it as the
+            # stored source would let a later visit to Configure from some other address
+            # silently re-point a phone that is already paired and working. Recording it
+            # as the custom address it effectively is keeps the existing promise that a
+            # deliberate URL survives re-opening the form.
+            source = URL_SOURCE_CUSTOM
+            custom = url
 
         self._url = url
         self._source = source
