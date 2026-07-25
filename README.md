@@ -3,43 +3,54 @@
 [![HACS Custom][hacs-badge]][hacs]
 [![Validate][validate-badge]][validate]
 
-Puts your iPhone's **daily step count** on your Home Assistant dashboard, so you can build a
-family step leaderboard. Pairs with the [**Steps Into HA**][apprepo] iOS app, which reads
-your step count from Apple Health and pushes it to your own Home Assistant — no third-party
-servers, no account, no subscription.
+## 🎯 Goal
 
-> **The iOS app is awaiting App Store review.** This integration works today with any build
-> of the app — see the note under step 3 if yours asks for the address and webhook ID as
-> separate fields.
+**Your family's daily step counts, on your Home Assistant dashboard.**
+
+## ✅ 5 steps
+
+Do these five things. Nothing else on this page is required.
+
+**1.** Install this integration in HACS → **restart Home Assistant.**
+
+**2.** Go to **Settings → Devices & Services → Add Integration → Steps Into HA.**
+Type a person's name.
+
+**3.** Pick the **address** their phone should use. Pick one that says *works from anywhere*.
+→ A **QR code** appears.
+
+**4.** Install the **[Steps Into HA app][apprepo]** on that person's iPhone. Allow Health access.
+
+**5.** In the app, **scan the QR code.**
+
+**Done.** You now have `sensor.<name>_steps`, updating about once an hour.
+
+**Another person?** Repeat steps 2–5. One entry per phone.
+
+**Stuck?** Everything below is detail. [Which address do I pick?](#which-address-step-3) ·
+[It's not working](#troubleshooting) · [Make a chart](#a-family-chart)
+
+--------------------------------------------------------------------------------
 
 <!-- TODO: screenshot of the QR pairing step and a family bar chart -->
 
+## What this is
+
+Pairs with the [**Steps Into HA**][apprepo] iOS app, which reads your step count from Apple
+Health and pushes it to your own Home Assistant — no third-party servers, no account, no
+subscription.
+
+> **The iOS app is awaiting App Store review.** This integration works today with any build
+> of the app.
+>
+> **If your build has no QR scanner** — it asks for a "Home Assistant address" and a
+> "Webhook ID" as separate fields — turn on **Advanced Mode** in your Home Assistant user
+> profile *before* step 2. The setup form then lets you pick your own webhook ID, short
+> enough to type by hand. Make it unguessable: it's the only thing protecting the sensor.
+
 ---
 
-## Setup
-
-**1. Install this integration** from HACS, then restart Home Assistant.
-
-**2. Add a person:** Settings → Devices & Services → **Add Integration** → *Steps Into HA*.
-Type a name. Home Assistant creates a private webhook for them.
-
-**3. Choose the address** their phone should send to — see below. Home Assistant then shows
-you a QR code.
-
-**4. Install [Steps Into HA][apprepo]** on that person's iPhone, allow Apple Health access,
-and scan the QR code.
-
-That's it. You get `sensor.<name>_steps`, updated about once an hour in the background.
-
-Repeat from step 2 for each family member — one entry per phone.
-
-> **Using an older version of the app** that asks for a "Home Assistant address" and a
-> "Webhook ID" in separate fields? Turn on **Advanced Mode** in your Home Assistant user
-> profile before step 2. The setup form then lets you choose your own webhook ID, so you can
-> pick something short enough to type. Make it unguessable — it's the only thing protecting
-> the sensor.
-
-### Which address? (step 3)
+## Which address? (step 3)
 
 The phone sends its step count from wherever it happens to be — the shops, work, school. So
 the address in the QR code has to reach Home Assistant **from outside your home**, or that
