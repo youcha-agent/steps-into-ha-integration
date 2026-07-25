@@ -18,9 +18,11 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 from custom_components.steps_into_ha.const import (
     CONF_CLOUDHOOK,
     CONF_PERSON,
+    CONF_URL_SOURCE,
     CONF_WEBHOOK_ID,
     CONF_WEBHOOK_URL,
     DOMAIN,
+    URL_SOURCE_INTERNAL,
 )
 
 from .conftest import WEBHOOK_ID
@@ -154,8 +156,9 @@ async def test_generated_ids_never_collide_with_yaml(hass, yaml_webhook):
     )
     assert result["step_id"] == "url"
 
+    # An explicit address, because the picker no longer preselects the internal one.
     result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], result["data_schema"]({})
+        result["flow_id"], {CONF_URL_SOURCE: URL_SOURCE_INTERNAL}
     )
 
     assert result["type"] is FlowResultType.FORM

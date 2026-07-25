@@ -63,15 +63,29 @@ async def main():
     )
     check("flow reaches address step", result["step_id"] == "url")
 
-    # Only the internal URL is configured here, so that's what the picker preselects.
+    # Only the internal URL is configured here, and an address that stops working when
+    # the phone leaves the house is never preselected — so the picker lands on custom
+    # with an empty box and the description says why.
     defaults = result["data_schema"]({})
     check(
-        "internal address preselected",
-        defaults["url_source"] == "internal",
+        "home-only address not preselected",
+        defaults["url_source"] == "custom",
         defaults["url_source"],
     )
+    check(
+        "form warns nothing reaches from outside",
+        "away from home" in result["description_placeholders"]["addresses"],
+        result["description_placeholders"]["addresses"],
+    )
 
-    result = await hass.config_entries.flow.async_configure(result["flow_id"], defaults)
+    # Internal is still offered — this run then takes it deliberately, because the rest
+    # of the check POSTs to it over a real socket.
+    options = result["data_schema"].schema["url_source"].config["options"]
+    check("internal still offered", "internal" in options, options)
+
+    result = await hass.config_entries.flow.async_configure(
+        result["flow_id"], {"url_source": "internal"}
+    )
     check("flow reaches connect step", result["step_id"] == "connect")
 
     url = result["description_placeholders"]["url"]

@@ -49,7 +49,7 @@ person will only sync when they're on your Wi-Fi.
 |---|---|
 | **Home Assistant Cloud** | You have a Nabu Casa subscription. A cloudhook is created for you: works from anywhere, no port forwarding, nothing exposed to the internet. Preselected when available. |
 | **External** | You've filled in Settings → System → Network → **External URL**. Preselected when there's no cloudhook. |
-| **Internal** | You only want syncing at home, or you're testing. |
+| **Internal** | You only want syncing at home, or you're testing. Never preselected — an address that stops working away from home has to be chosen on purpose. |
 | **Custom** | You reach Home Assistant through a **reverse proxy, your own domain, DuckDNS or Tailscale** — addresses Home Assistant can't discover for itself. |
 
 Custom is the one to reach for if remote syncing isn't working. Home Assistant only knows
@@ -57,8 +57,17 @@ about addresses you've told it about, so a proxy you set up outside of it won't 
 the list on its own. Paste just the base address — `https://ha.example.com` — and the
 webhook path is added for you.
 
+If the internal address is the only one Home Assistant can find, the form lands on
+**Custom** with an empty box and says so, rather than preselecting an address that only
+works on your Wi-Fi.
+
 You can change this later from the integration's **Configure** button, which shows a fresh
 QR code to re-scan.
+
+> **No address step at all?** You're on a version before 1.1.0, which paired phones to
+> whatever address Home Assistant happened to pick — usually the internal one. Update in
+> HACS and **restart Home Assistant**; the step won't appear until the restart. Then open
+> **Configure** on each person, choose the address, and re-scan the new code.
 
 ---
 

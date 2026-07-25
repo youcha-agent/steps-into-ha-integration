@@ -24,10 +24,16 @@ URL_SOURCE_EXTERNAL = "external"
 URL_SOURCE_INTERNAL = "internal"
 URL_SOURCE_CUSTOM = "custom"
 
-# What the picker preselects when nothing has been chosen yet. Whichever of these
-# reaches Home Assistant from outside the house wins, because the phone syncs from
-# wherever it happens to be.
+# The order addresses are listed and ranked in. Whichever of these reaches Home Assistant
+# from outside the house wins, because the phone syncs from wherever it happens to be.
 URL_SOURCE_PREFERENCE = (URL_SOURCE_CLOUD, URL_SOURCE_EXTERNAL, URL_SOURCE_INTERNAL)
+
+# What the picker will preselect on its own. Internal is deliberately absent: it stays
+# listed and one click away, but an address that only works at home has to be chosen
+# on purpose rather than collected by pressing Submit. Without this, anyone reaching Home
+# Assistant through a reverse proxy it can't discover is handed a 192.168.x.x URL by
+# default — which is exactly how a phone ends up syncing only on home Wi-Fi.
+URL_SOURCE_PRESELECT = (URL_SOURCE_CLOUD, URL_SOURCE_EXTERNAL)
 
 # Webhook payload keys, matching StepPayload in the iOS app.
 ATTR_STEPS = "steps"

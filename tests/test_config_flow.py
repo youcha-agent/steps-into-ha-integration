@@ -58,6 +58,10 @@ async def _accept_default_address(manager, result):
 
     Takes the flow manager because the same picker is served by the config flow
     (`hass.config_entries.flow`) and the options flow (`hass.config_entries.options`).
+
+    Only usable where the default is a real address — with no external URL and no
+    cloudhook the picker deliberately lands on an empty `custom`, which won't submit.
+    Use `_choose_internal_address` for tests that are only passing through the picker.
     """
     defaults = result["data_schema"]({})
     return await manager.async_configure(
@@ -66,6 +70,18 @@ async def _accept_default_address(manager, result):
             CONF_URL_SOURCE: defaults[CONF_URL_SOURCE],
             CONF_CUSTOM_URL: defaults[CONF_CUSTOM_URL],
         },
+    )
+
+
+async def _choose_internal_address(manager, result):
+    """Submit the address picker on the internal address, explicitly.
+
+    The picker no longer preselects internal — syncing at home only has to be a decision,
+    not the consequence of pressing Submit — so tests whose subject is something else say
+    out loud which address they mean.
+    """
+    return await manager.async_configure(
+        result["flow_id"], {CONF_URL_SOURCE: URL_SOURCE_INTERNAL}
     )
 
 
@@ -85,7 +101,7 @@ async def test_user_flow_generates_webhook(hass) -> None:
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "url"
 
-    result = await _accept_default_address(hass.config_entries.flow, result)
+    result = await _choose_internal_address(hass.config_entries.flow, result)
     assert result["type"] is FlowResultType.FORM
     assert result["step_id"] == "connect"
 
@@ -108,7 +124,7 @@ async def test_user_flow_generates_webhook(hass) -> None:
 async def test_name_is_trimmed(hass) -> None:
     """Leading/trailing whitespace in the name shouldn't reach the device registry."""
     result = await _reach_url_step(hass, "  Dad  ")
-    result = await _accept_default_address(hass.config_entries.flow, result)
+    result = await _choose_internal_address(hass.config_entries.flow, result)
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
     assert result["data"][CONF_PERSON] == "Dad"
 
@@ -137,7 +153,7 @@ async def test_advanced_mode_allows_custom_webhook_id(hass) -> None:
     )
     assert result["step_id"] == "url"
 
-    result = await _accept_default_address(hass.config_entries.flow, result)
+    result = await _choose_internal_address(hass.config_entries.flow, result)
     assert result["step_id"] == "connect"
 
     result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
@@ -178,7 +194,7 @@ async def test_duplicate_webhook_id_aborts(hass, config_entry) -> None:
 async def test_qr_encodes_pairing_payload(hass) -> None:
     """The QR carries versioned JSON so the app can prefill the name."""
     result = await _reach_url_step(hass)
-    result = await _accept_default_address(hass.config_entries.flow, result)
+    result = await _choose_internal_address(hass.config_entries.flow, result)
 
     qr_selector = result["data_schema"].schema["qr"]
     payload = json.loads(qr_selector.config["data"])
@@ -300,11 +316,46 @@ async def test_cloud_is_preselected_over_external(hass, mock_cloud) -> None:
     assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_CLOUD
 
 
-async def test_internal_is_preselected_when_nothing_else(hass) -> None:
-    """With no external address there's nothing better to offer — but it is a choice."""
+async def test_custom_is_preselected_when_only_internal_exists(hass) -> None:
+    """The regression this exists to prevent, reported from a real pairing.
+
+    With Home Assistant behind a reverse proxy it can't discover, internal is the only
+    address it knows — and preselecting it meant pressing Submit handed the phone a
+    192.168.x.x URL that stopped working the moment its owner left the house. Land on
+    custom instead, so the home-only answer has to be given rather than defaulted into.
+    """
     result = await _reach_url_step(hass)
 
-    assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_INTERNAL
+    assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_CUSTOM
+    # Still offered, just not by default — plenty of people only want this at home.
+    options = result["data_schema"].schema[CONF_URL_SOURCE].config["options"]
+    assert URL_SOURCE_INTERNAL in options
+    # And the form says out loud why it didn't pick one for you.
+    assert "away from home" in result["description_placeholders"]["addresses"]
+
+
+async def test_no_home_only_warning_when_external_exists(hass) -> None:
+    """The warning is about having nothing better, so don't cry wolf."""
+    hass.config.external_url = EXTERNAL_BASE
+
+    result = await _reach_url_step(hass)
+
+    assert "away from home" not in result["description_placeholders"]["addresses"]
+
+
+async def test_choosing_internal_still_works(hass) -> None:
+    """Discouraged is not disallowed: home-only sync is a legitimate choice."""
+    result = await _reach_url_step(hass)
+    result = await _choose_internal_address(hass.config_entries.flow, result)
+
+    assert result["step_id"] == "connect"
+    webhook_id = result["description_placeholders"]["webhook_id"]
+    expected = f"http://10.0.0.2:8123/api/webhook/{webhook_id}"
+    assert result["description_placeholders"]["url"] == expected
+
+    result = await hass.config_entries.flow.async_configure(result["flow_id"], {})
+    assert result["data"][CONF_WEBHOOK_URL] == expected
+    assert result["data"][CONF_URL_SOURCE] == URL_SOURCE_INTERNAL
 
 
 async def test_choosing_external_puts_it_in_the_qr(hass) -> None:
@@ -409,7 +460,7 @@ async def test_options_flow_reshows_qr(hass, config_entry: MockConfigEntry) -> N
     assert result["step_id"] == "init"
     assert result["description_placeholders"]["person"] == "Dad"
 
-    result = await _accept_default_address(hass.config_entries.options, result)
+    result = await _choose_internal_address(hass.config_entries.options, result)
     assert result["step_id"] == "connect"
     assert "qr" in result["data_schema"].schema
 
@@ -422,11 +473,40 @@ async def test_options_flow_refreshes_changed_url(
     hass.config.internal_url = "http://10.0.0.9:8123"
 
     result = await hass.config_entries.options.async_init(config_entry.entry_id)
-    result = await _accept_default_address(hass.config_entries.options, result)
+    result = await _choose_internal_address(hass.config_entries.options, result)
 
     expected = f"http://10.0.0.9:8123/api/webhook/{WEBHOOK_ID}"
     assert result["description_placeholders"]["url"] == expected
     assert config_entry.data[CONF_WEBHOOK_URL] == expected
+
+
+async def test_options_flow_asks_again_for_a_pre_choice_entry(
+    hass, config_entry: MockConfigEntry
+) -> None:
+    """The upgrade path for anyone paired before the address was a choice.
+
+    Their entry carries `auto` and a URL that came out of `async_generate_url` — which,
+    with no external URL configured, means the internal one. Opening Configure has to be
+    the moment they get asked, not a form that re-offers what they already have.
+    """
+    config_entry.add_to_hass(hass)
+
+    result = await hass.config_entries.options.async_init(config_entry.entry_id)
+
+    assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_CUSTOM
+    assert result["data_schema"]({})[CONF_CUSTOM_URL] == ""
+    assert "away from home" in result["description_placeholders"]["addresses"]
+
+    # Pasting a reverse-proxy base is enough; the webhook path is appended.
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"],
+        {CONF_URL_SOURCE: URL_SOURCE_CUSTOM, CONF_CUSTOM_URL: EXTERNAL_BASE},
+    )
+
+    expected = f"{EXTERNAL_BASE}/api/webhook/{WEBHOOK_ID}"
+    assert result["description_placeholders"]["url"] == expected
+    assert config_entry.data[CONF_WEBHOOK_URL] == expected
+    assert config_entry.data[CONF_URL_SOURCE] == URL_SOURCE_CUSTOM
 
 
 async def test_options_flow_preselects_stored_source(
@@ -483,6 +563,8 @@ async def test_options_flow_falls_back_when_source_vanishes(
 
     result = await hass.config_entries.options.async_init(config_entry.entry_id)
 
-    assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_INTERNAL
+    # Falls back the same way a fresh flow lands: nothing here reaches this phone from
+    # outside, so ask rather than quietly re-pair it to a home-only address.
+    assert result["data_schema"]({})[CONF_URL_SOURCE] == URL_SOURCE_CUSTOM
     assert result["description_placeholders"]["notice"]
 

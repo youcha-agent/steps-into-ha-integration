@@ -40,6 +40,7 @@ from .const import (
     URL_SOURCE_EXTERNAL,
     URL_SOURCE_INTERNAL,
     URL_SOURCE_PREFERENCE,
+    URL_SOURCE_PRESELECT,
 )
 
 # A custom ID is offered only under "advanced mode", for people running the v1.0 app
@@ -131,10 +132,12 @@ async def async_url_candidates(
 def preferred_source(candidates: dict[str, str]) -> str:
     """Which candidate the picker should land on when nothing has been chosen.
 
-    Falls back to `custom` when Home Assistant knows of no address at all — the user has
-    to type one, and that's a fair thing to ask at that point.
+    Only an address that works away from home is ever preselected. Everything else falls
+    back to `custom` — including the case where the internal address is the only one Home
+    Assistant knows, because pressing Submit on that hands the phone a URL that stops
+    working at the end of the drive. Internal is still listed; it just has to be picked.
     """
-    for source in URL_SOURCE_PREFERENCE:
+    for source in URL_SOURCE_PRESELECT:
         if source in candidates:
             return source
     return URL_SOURCE_CUSTOM
@@ -238,6 +241,10 @@ def _address_list(candidates: dict[str, str]) -> str:
 
     Naming them in full makes the choice concrete — "external" means nothing until you
     can see it's the domain you actually use.
+
+    Composed here rather than in `strings.json` because the addresses themselves are
+    runtime values. That also keeps it clear of hassfest's rule against URLs in
+    translation strings.
     """
     labels = {
         URL_SOURCE_CLOUD: "Home Assistant Cloud",
@@ -251,6 +258,17 @@ def _address_list(candidates: dict[str, str]) -> str:
     ]
     if not lines:
         return "_Home Assistant doesn't know any address for itself yet._"
+
+    if not any(source in candidates for source in URL_SOURCE_PRESELECT):
+        # Only the internal address exists, so there is nothing here that keeps working
+        # once the phone leaves the house. Say so instead of letting Submit decide.
+        lines.append(
+            "\n⚠️ **None of these work away from home.** If you reach Home Assistant"
+            " from outside — a reverse proxy, your own domain, DuckDNS, Tailscale — pick"
+            " **Custom** below and paste that address. Otherwise choose **Internal** and"
+            " steps will sync on your home Wi-Fi only."
+        )
+
     return "\n".join(lines)
 
 
