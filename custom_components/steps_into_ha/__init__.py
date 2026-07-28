@@ -35,11 +35,19 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[Platform] = [Platform.SENSOR]
 
+# The upper bound is the important half. The sensor is TOTAL_INCREASING, so one absurd
+# reading is absorbed into long-term statistics permanently — a later, smaller value
+# cannot correct it, and every historical chart stays skewed. 200,000 is roughly four
+# times the highest plausible human day, so it never rejects real data.
+MAX_STEPS = 200_000
+
 # ALLOW_EXTRA so a future app version can add fields without breaking older
 # integration installs.
 WEBHOOK_SCHEMA = vol.Schema(
     {
-        vol.Required(ATTR_STEPS): vol.All(vol.Coerce(int), vol.Range(min=0)),
+        vol.Required(ATTR_STEPS): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=MAX_STEPS)
+        ),
         vol.Optional(ATTR_PERSON): cv.string,
         vol.Optional(ATTR_TIMESTAMP): cv.string,
     },

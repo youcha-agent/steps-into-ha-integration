@@ -9,6 +9,7 @@ from __future__ import annotations
 import pytest
 from homeassistant.config_entries import ConfigEntryState
 
+from custom_components.steps_into_ha import MAX_STEPS
 from custom_components.steps_into_ha.const import CONF_CLOUDHOOK
 
 from .conftest import WEBHOOK_ID
@@ -49,6 +50,21 @@ async def test_extra_fields_are_tolerated(hass, setup_entry, hass_client_no_auth
     assert hass.states.get("sensor.dad_steps").state == "100"
 
 
+async def test_max_steps_is_accepted(hass, setup_entry, hass_client_no_auth):
+    """The bound rejects nonsense without rejecting a real day.
+
+    Guards the ceiling from being tightened to something a person could actually walk —
+    the whole point of 200,000 is that no human reaches it.
+    """
+    client = await hass_client_no_auth()
+
+    response = await client.post(PATH, json={"steps": MAX_STEPS, "person": "Dad"})
+
+    assert response.status == 200
+    await hass.async_block_till_done()
+    assert hass.states.get("sensor.dad_steps").state == str(MAX_STEPS)
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -57,8 +73,9 @@ async def test_extra_fields_are_tolerated(hass, setup_entry, hass_client_no_auth
         {"steps": "banana"},
         {"steps": -5},
         {"steps": None},
+        {"steps": 99999999},
     ],
-    ids=["empty", "no_steps", "not_a_number", "negative", "null"],
+    ids=["empty", "no_steps", "not_a_number", "negative", "null", "absurdly_large"],
 )
 async def test_bad_payload_returns_400(hass, setup_entry, hass_client_no_auth, payload):
     """Answer 400, not 200.
