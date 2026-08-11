@@ -19,9 +19,9 @@ Type a person's name.
 **3.** Pick the **address** their phone should use. Pick one that says *works from anywhere*.
 → A **QR code** appears.
 
-**4.** Install the **[Steps Into HA app][apprepo]** on that person's iPhone. Allow Health access.
+**4.** Install **[Plain and Simple Tools][apprepo]** on that person's iPhone, open the **Steps to HA** tool, and allow Health access.
 
-**5.** In the app, **scan the QR code.**
+**5.** In the tool, tap **Scan code from Home Assistant** and **scan the QR code.**
 
 **Done.** You now have `sensor.<name>_steps`, updating about once an hour.
 
@@ -40,8 +40,11 @@ Pairs with the [**Steps Into HA**][apprepo] iOS app, which reads your step count
 Health and pushes it to your own Home Assistant — no third-party servers, no account, no
 subscription.
 
-> **The iOS app is awaiting App Store review.** This integration works today with any build
-> of the app.
+> **The iPhone app is now a tool inside [Plain and Simple Tools][apprepo], called Steps to HA.**
+> It replaces the standalone *Steps Into HA* app, which is being retired. This integration is
+> unchanged and works with either — the pairing QR code is the same, so **an existing setup keeps
+> working and your sensor keeps its history.** Moving across means scanning the same QR code
+> again in the new app; nothing here needs editing.
 >
 > **If your build has no QR scanner** — it asks for a "Home Assistant address" and a
 > "Webhook ID" as separate fields — turn on **Advanced Mode** in your Home Assistant user
@@ -217,10 +220,10 @@ PATH="$PWD/.venv/bin:$PATH" ./scripts/run_live_check.sh
 
 ## Related
 
-- [Steps Into HA iOS app][apprepo] — App Store listing pending review
+- [Plain and Simple Tools][apprepo] — the iPhone app; Steps to HA is one of its tools
 
-[apprepo]: https://github.com/youcha-agent/steps-into-ha
-[privacy]: https://github.com/youcha-agent/steps-into-ha/blob/main/PRIVACY.md
+[apprepo]: https://apps.apple.com/app/id6799114386
+[privacy]: https://plainandsimple.app/apps/plain-and-simple-tools/privacy
 [apexcharts]: https://github.com/RomRider/apexcharts-card
 [hacs]: https://hacs.xyz
 [hacs-badge]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg
